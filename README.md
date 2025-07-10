@@ -48,7 +48,6 @@ Community discussions happen primarily on the [dev mailing list][dev-list] or on
 
 [dev-list]: mailto:dev@iceberg.apache.org
 
-
 ### Building
 
 Iceberg is built using Gradle with Java 11, 17, or 21.
@@ -93,6 +92,12 @@ sudo setenforce Enforcing
 ```
 
 ---
+
+### REST API Specification
+Iceberg defines a REST-based catalog API for managing table metadata and performing catalog operations. You can find the OpenAPI specification here:
+[REST Catalog OpenAPI YAML][iceberg-rest-spec]
+
+[iceberg-rest-spec]: https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml
 
 ### Engine Compatibility
 
