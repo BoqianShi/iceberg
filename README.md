@@ -48,6 +48,7 @@ Community discussions happen primarily on the [dev mailing list][dev-list] or on
 
 [dev-list]: mailto:dev@iceberg.apache.org
 
+
 ### Building
 
 Iceberg is built using Gradle with Java 11, 17, or 21.
