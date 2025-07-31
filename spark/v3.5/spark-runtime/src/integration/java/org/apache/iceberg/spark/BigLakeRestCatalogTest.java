@@ -27,8 +27,15 @@ public class BigLakeRestCatalogTest {
 
   private static SparkSession spark;
 
-  private static final String WAREHOUSE_BUCKET = "gs://boqianshi-iceberg-vended-test";
+  private static final String WAREHOUSE_BUCKET = "gs://boqianshi-iceberg-vended-debug";
+//  private static final String WAREHOUSE_BUCKET = "gs://boqianshi-unique-project-debug";
+
+//  private static final String WAREHOUSE_NONE_VENDED = "gs://boqianshi-gcs";
   private static final String PROJECT_ID = "google.com:hadoop-cloud-dev";
+//  private static final String PROJECT_ID = "google.com:boqian-iceberg-test";
+
+  private static final String PROD_URI = "https://biglake.googleapis.com/iceberg/v1beta/restcatalog";
+  private static final String TEST_URI = "https://test-biglake.sandbox.googleapis.com/iceberg/v1alpha/restcatalog";
 
   @BeforeClass
   public static void setupSpark() {
@@ -40,12 +47,12 @@ public class BigLakeRestCatalogTest {
                     .config("spark.sql.catalog.biglake.type", "rest")
                     .config(
                             "spark.sql.catalog.biglake.uri",
-                            "https://biglake.googleapis.com/iceberg/v1beta/restcatalog")
+                            PROD_URI)
                     .config("spark.sql.catalog.biglake.warehouse", WAREHOUSE_BUCKET)
                     .config("spark.sql.catalog.biglake.header.x-goog-user-project", PROJECT_ID)
-                    .config(
-                            "spark.sql.catalog.biglake.rest.auth.type",
+                    .config("spark.sql.catalog.biglake.rest.auth.type",
                             "org.apache.iceberg.gcp.auth.GoogleAuthManager")
+//                    .config("spark.sql.catalog.biglake.oauth2-server-uri", "https://oauth2.googleapis.com/token")
                     .config(
                             "spark.sql.extensions",
                             "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
@@ -72,7 +79,15 @@ public class BigLakeRestCatalogTest {
 
   @Test
   public void testCreateTableAndSelect() {
+
+    spark.sql("CREATE DATABASE IF NOT EXISTS biglake.test");
     spark.sql("USE biglake.test");
-    spark.sql("SELECT * from test.shakespeare where word='spark'").show();
+    //spark.sql("SELECT * from test.shakespeare where word='spark'").show();
+    String tableName = "test_table";
+    spark.sql("DROP TABLE IF EXISTS " + tableName);
+    spark.sql("CREATE TABLE " + tableName + " (id BIGINT, data STRING) USING iceberg");
+    spark.sql("INSERT INTO " + tableName + " VALUES (1, 'a'), (2, 'b'), (3, 'c')");
+    spark.sql("SELECT * FROM " + tableName + " ORDER BY id").show();
+    spark.sql("DROP TABLE " + tableName);
   }
 }
