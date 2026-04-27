@@ -38,6 +38,10 @@ azuresdk-bom = "1.3.6"
 awssdk-s3accessgrants = "2.4.1"
 bouncycastle = "1.82"
 bson-ver = "4.11.5"
+# spark-bigquery-connector libraries used by the HybridStream BigQuery integration in
+# iceberg-spark-3.5. Bumping requires re-checking the public constructor of
+# com.google.cloud.spark.bigquery.v2.context.ArrowInputPartitionContext (Slice 1 task model).
+spark-bigquery-connector = "0.42.4"
 caffeine = "2.9.3"
 calcite = "1.41.0"
 datasketches = "6.2.0"
@@ -179,6 +183,8 @@ scala-collection-compat = { module = "org.scala-lang.modules:scala-collection-co
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 snowflake-jdbc = { module = "net.snowflake:snowflake-jdbc", version.ref = "snowflake-jdbc" }
+spark-bigquery-connector-common = { module = "com.google.cloud.spark:bigquery-connector-common", version.ref = "spark-bigquery-connector" }
+spark-bigquery-dsv2-common = { module = "com.google.cloud.spark:spark-bigquery-dsv2-common", version.ref = "spark-bigquery-connector" }
 
 # test libraries
 apiguardian = { module = "org.apiguardian:apiguardian-api", version.ref = "apiguardian" }

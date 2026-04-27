@@ -32,11 +32,14 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.metrics.ScanReport;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.SparkReadConf;
 import org.apache.iceberg.util.TableScanUtil;
+import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.connector.read.Batch;
 
 /**
  * A {@link SparkScan} that emits a heterogeneous mix of {@link FileScanTask}s (read from GCS via
@@ -55,8 +58,12 @@ import org.apache.spark.sql.SparkSession;
  */
 class HybridSparkScan extends SparkScan {
 
+  private final SparkSession spark;
+  private final Supplier<FileIO> fileIO;
+  private final SparkReadConf readConf;
   private final Scan<?, ? extends ScanTask, ? extends ScanTaskGroup<?>> fileScan;
   private final BqAdvancedScanPlanner bqPlanner;
+  private final HybridReaderConfig readerConfig;
 
   // lazy caches
   private List<FileScanTask> fileTasks = null;
@@ -68,6 +75,7 @@ class HybridSparkScan extends SparkScan {
       Table table,
       Scan<?, ? extends ScanTask, ? extends ScanTaskGroup<?>> fileScan,
       BqAdvancedScanPlanner bqPlanner,
+      HybridReaderConfig readerConfig,
       SparkReadConf readConf,
       Schema expectedSchema,
       List<Expression> filters,
@@ -80,8 +88,26 @@ class HybridSparkScan extends SparkScan {
         expectedSchema,
         filters,
         scanReportSupplier);
+    this.spark = spark;
+    this.fileIO = null != fileScan ? fileScan.fileIO() : table::io;
+    this.readConf = readConf;
     this.fileScan = fileScan;
     this.bqPlanner = bqPlanner != null ? bqPlanner : BqAdvancedScanPlanner.noop();
+    this.readerConfig = readerConfig;
+  }
+
+  @Override
+  public Batch toBatch() {
+    return new HybridSparkBatch(
+        JavaSparkContext.fromSparkContext(spark.sparkContext()),
+        table(),
+        fileIO,
+        readConf,
+        groupingKeyType(),
+        taskGroups(),
+        expectedSchema(),
+        hashCode(),
+        readerConfig);
   }
 
   @Override

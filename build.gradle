@@ -188,7 +188,11 @@ subprojects {
 
     compileClasspath {
       // do not exclude Guava so the bundle project can reference classes.
-      if (project.name != 'iceberg-bundled-guava') {
+      // iceberg-spark-3.5_2.12 also needs unshaded Guava on its classpath because the
+      // spark-bigquery-connector's ArrowInputPartitionContext API takes a
+      // com.google.common.collect.ImmutableList (HybridStream BigQuery integration).
+      if (project.name != 'iceberg-bundled-guava'
+          && !project.name.startsWith('iceberg-spark-3.5_')) {
         exclude group: 'com.google.guava', module: 'guava'
       }
       // contains a copy of Guava

@@ -94,6 +94,21 @@ project(":iceberg-spark:iceberg-spark-${sparkMajorVersion}_${scalaVersion}") {
 
     implementation libs.caffeine
 
+    // HybridStream BigQuery integration: lean libs from spark-bigquery-connector for the
+    // executor-side Arrow -> ColumnarBatch path. We deliberately avoid the umbrella
+    // spark-3.5-bigquery_2.12 jar so the connector's own DSv2 TableProvider does not
+    // collide with Iceberg's. Excludes mirror the existing iceberg-arrow conventions.
+    implementation(libs.spark.bigquery.dsv2.common) {
+      exclude group: 'org.apache.spark'
+      exclude group: 'org.apache.arrow'
+      exclude group: 'io.netty'
+      exclude group: 'org.scala-lang'
+    }
+    implementation(libs.spark.bigquery.connector.common) {
+      exclude group: 'org.apache.arrow'
+      exclude group: 'io.netty'
+    }
+
     testImplementation(libs.hadoop3.minicluster) {
       exclude group: 'org.apache.avro', module: 'avro'
       // to make sure netty libs only come from project(':iceberg-arrow')
