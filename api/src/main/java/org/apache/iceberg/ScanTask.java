@@ -79,6 +79,21 @@ public interface ScanTask extends Serializable {
     throw new IllegalStateException("Not a DataTask: " + this);
   }
 
+  /** Returns true if this is a {@link BqStreamScanTask}, false otherwise. */
+  default boolean isBqStreamScanTask() {
+    return false;
+  }
+
+  /**
+   * Returns this cast to {@link BqStreamScanTask} if it is one
+   *
+   * @return this cast to {@link BqStreamScanTask} if it is one
+   * @throws IllegalStateException if this is not a {@link BqStreamScanTask}
+   */
+  default BqStreamScanTask asBqStreamScanTask() {
+    throw new IllegalStateException("Not a BqStreamScanTask: " + this);
+  }
+
   /**
    * Returns this cast to {@link CombinedScanTask} if it is one
    *
