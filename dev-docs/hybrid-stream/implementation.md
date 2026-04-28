@@ -4,15 +4,19 @@ This document is a self-contained spec for the HybridStream feature added to the
 Apache Iceberg. It is detailed enough that another engineer (or agent) can rebuild the entire
 implementation **without reading the underlying commits**. It covers the problem, the architectural
 decision, and exact file-by-file changes for Slices 1–3 (data model, driver-side planning,
-executor-side reader). Slice 4 (credential vending, file-half routing refinement, end-to-end
-testing) is sketched at the end as the immediate next-step.
+executor-side reader), plus the Spark 4.0 port. Slice 4 (credential vending, file-half routing
+refinement, end-to-end testing) is sketched at the end as the immediate next-step; its discovery
+brief — for an internal Google research agent — lives next to this file at
+[`slice-4-research-prompt.md`](slice-4-research-prompt.md).
 
-> **Status (snapshot at writing time):**
+> **Status:**
 > - Iceberg base: 1.10 line, branch tag `apache-iceberg-1.10.0-970-g5dae5fc85`
-> - Spark target: 3.5, Scala 2.12 (other Spark versions untouched)
-> - `spark-bigquery-connector`: 0.42.4, lean libs only
-> - Slices 1, 2, 3 implemented and pushed to feature branches on the fork
-> - Slice 4 not yet started
+> - Spark targets: **3.5 (Scala 2.12)** and **4.0 (Scala 2.13)** — both modules carry the full
+>   HybridStream stack; the v4.0 port is a verbatim copy of v3.5 (see [§9 Porting](#9-porting-to-additional-spark-versions)).
+> - `spark-bigquery-connector`: 0.42.4, lean libs only (Maven Central)
+> - Slices 1, 2, 3 implemented and pushed to feature branches on the fork.
+> - Slice 4 not yet started; most of its open questions need google3 / artifact-registry /
+>   internal-docs access and are tracked in [`slice-4-research-prompt.md`](slice-4-research-prompt.md).
 
 ## Table of contents
 
@@ -24,11 +28,12 @@ testing) is sketched at the end as the immediate next-step.
 6. [Slice 2 — Driver-side heterogeneous planning](#6-slice-2--driver-side-heterogeneous-planning)
 7. [Slice 3 — Executor-side router + BigQuery reader](#7-slice-3--executor-side-router--bigquery-reader)
 8. [Build configuration changes](#8-build-configuration-changes)
-9. [Verification commands](#9-verification-commands)
-10. [Pitfalls encountered (and how to avoid them)](#10-pitfalls-encountered-and-how-to-avoid-them)
-11. [Known limitations and Slice 4 roadmap](#11-known-limitations-and-slice-4-roadmap)
-12. [Appendix A — External types we depend on](#appendix-a--external-types-we-depend-on)
-13. [Appendix B — Iceberg internals referenced](#appendix-b--iceberg-internals-referenced)
+9. [Porting to additional Spark versions](#9-porting-to-additional-spark-versions)
+10. [Verification commands](#10-verification-commands)
+11. [Pitfalls encountered (and how to avoid them)](#11-pitfalls-encountered-and-how-to-avoid-them)
+12. [Known limitations and Slice 4 roadmap](#12-known-limitations-and-slice-4-roadmap)
+13. [Appendix A — External types we depend on](#appendix-a--external-types-we-depend-on)
+14. [Appendix B — Iceberg internals referenced](#appendix-b--iceberg-internals-referenced)
 
 ---
 
@@ -225,16 +230,19 @@ EXECUTOR
 
 ## 4. Implementation roadmap (slice overview)
 
-The work is split into **four** vertical slices, three already implemented:
+The work is split into **four** vertical slices plus a porting sub-task. Slices 1–3 and the
+v4.0 port are done; Slice 4 is pending.
 
 | Slice | Status | Purpose | Module(s) |
 |---|---|---|---|
 | 1 | DONE | `BqStreamScanTask` interface + impl + serialization | `iceberg-api`, `iceberg-core` |
 | 2 | DONE | `HybridSparkScan` + heterogeneous bin-packing + `BqAdvancedScanPlanner` SPI | `iceberg-spark-3.5_2.12` |
 | 3 | DONE | `HybridColumnarReaderFactory` + `BigQueryStreamColumnarReader` | `iceberg-spark-3.5_2.12` |
-| 4 | TODO | Cred vending, file-half ORC/row fallback, end-to-end test, `bq-advanced` table detection | various |
+| v4.0 port | DONE | Mirror of Slices 2 + 3 in the Spark 4.0 module (Slice 1 is shared via api/core) | `iceberg-spark-4.0_2.13` |
+| 4 | TODO | Cred vending, file-half ORC/row fallback, end-to-end test, `bq-advanced` table detection | various — see [`slice-4-research-prompt.md`](slice-4-research-prompt.md) |
 
-Each slice should land as its own commit / branch / PR. Slice N+1 depends on N.
+Each slice should land as its own commit / branch / PR. Slice N+1 depends on N. The v4.0 port
+depends on Slice 3 only (file copy + build edits — no source-level changes); see [§9](#9-porting-to-additional-spark-versions).
 
 ---
 
@@ -1387,21 +1395,23 @@ if (project.name != 'iceberg-bundled-guava') {
 
 The connector's `ArrowInputPartitionContext` constructor takes
 `com.google.common.collect.ImmutableList<String>` (the unshaded variant). With the global
-exclusion in force, that import doesn't resolve. Exempt the spark-3.5 module:
+exclusion in force, that import doesn't resolve. Exempt the Spark 3.5 and 4.0 modules:
 
 ```gradle
 // after
-// iceberg-spark-3.5_2.12 also needs unshaded Guava on its classpath because the
-// spark-bigquery-connector's ArrowInputPartitionContext API takes a
-// com.google.common.collect.ImmutableList (HybridStream BigQuery integration).
+// iceberg-spark-3.5_* and iceberg-spark-4.0_* also need unshaded Guava on their
+// classpath because the spark-bigquery-connector's ArrowInputPartitionContext API
+// takes a com.google.common.collect.ImmutableList (HybridStream BigQuery integration).
 if (project.name != 'iceberg-bundled-guava'
-    && !project.name.startsWith('iceberg-spark-3.5_')) {
+    && !project.name.startsWith('iceberg-spark-3.5_')
+    && !project.name.startsWith('iceberg-spark-4.0_')) {
   exclude group: 'com.google.guava', module: 'guava'
 }
 ```
 
 This is the smallest possible blast-radius change; all other modules still see only
-relocated Guava.
+relocated Guava. When porting to a new Spark version (see [§9](#9-porting-to-additional-spark-versions)),
+add another `&& !project.name.startsWith('iceberg-spark-X.Y_')` clause.
 
 ### 8.4 Sanity-check the dependency graph
 
@@ -1423,7 +1433,95 @@ Expected output (truncated):
 
 ---
 
-## 9. Verification commands
+## 9. Porting to additional Spark versions
+
+Slice 1 lives in `iceberg-api` + `iceberg-core` and is shared across all Spark versions
+automatically — no per-version code there.
+
+Slices 2 + 3 live in `spark/v3.5/spark/.../source/`. Iceberg keeps parallel module trees
+per Spark version (`spark/v3.4/`, `spark/v3.5/`, `spark/v4.0/`, `spark/v4.1/`, …) with
+roughly identical source. **For HybridStream specifically, the underlying classes we touch
+or extend (`SparkScan`, `SparkBatch`, `SparkInputPartition`, `SparkColumnarReaderFactory`,
+`ParquetBatchReadConf`) are byte-identical between Spark 3.5 and 4.0 in this Iceberg base** —
+so the v4.0 port was a verbatim file copy with no source-level changes. The same is likely
+to hold for any future Spark 3.x → 4.x port; verify with `diff -q` first.
+
+### 9.1 Recipe
+
+For a target Spark version `X.Y` with Scala suffix `_S.S` (e.g. `4.0` + `_2.13`):
+
+1. **Confirm the underlying classes are unchanged** between `spark/v3.5/spark/...` and
+   `spark/vX.Y/spark/...`:
+   ```bash
+   for f in SparkScan SparkBatch SparkInputPartition SparkColumnarReaderFactory; do
+     diff -q spark/v3.5/spark/src/main/java/org/apache/iceberg/spark/source/$f.java \
+             spark/vX.Y/spark/src/main/java/org/apache/iceberg/spark/source/$f.java
+   done
+   diff -q spark/v3.5/spark/src/main/java/org/apache/iceberg/spark/ParquetBatchReadConf.java \
+           spark/vX.Y/spark/src/main/java/org/apache/iceberg/spark/ParquetBatchReadConf.java
+   ```
+   If anything differs, read the diff before proceeding — the new Spark version may have
+   reshaped a base class and the HybridStream code may need a tweak.
+
+2. **Copy the six new main files + three test files verbatim**:
+   ```bash
+   SRC_M=spark/v3.5/spark/src/main/java/org/apache/iceberg/spark/source
+   DST_M=spark/vX.Y/spark/src/main/java/org/apache/iceberg/spark/source
+   SRC_T=spark/v3.5/spark/src/test/java/org/apache/iceberg/spark/source
+   DST_T=spark/vX.Y/spark/src/test/java/org/apache/iceberg/spark/source
+   for f in BqAdvancedScanPlanner HybridReaderConfig BigQueryStreamColumnarReader \
+            HybridColumnarReaderFactory HybridSparkBatch HybridSparkScan; do
+     cp "$SRC_M/$f.java" "$DST_M/$f.java"
+   done
+   for f in TestHybridSparkScan TestHybridColumnarReaderFactory TestBigQueryStreamColumnarReader; do
+     cp "$SRC_T/$f.java" "$DST_T/$f.java"
+   done
+   ```
+
+3. **Replicate the `TODO(bq-advanced)` comment** at the top of
+   `spark/vX.Y/spark/.../SparkScanBuilder.java`'s `buildBatchScan()` method
+   (see [§6.6](#66-sparkscanbuilder-modification) for the verbatim text).
+
+4. **Add the connector deps** to `spark/vX.Y/build.gradle`. Anchor: the line
+   `implementation libs.caffeine`. Insert immediately after, with the same block of excludes
+   shown in [§8.2](#82-sparkv35buildgradle).
+
+5. **Widen the root `build.gradle` Guava-exclusion exemption** to include `iceberg-spark-X.Y_*`
+   (see [§8.3](#83-root-buildgradle-guava-exclusion-exemption)).
+
+6. **Verify** with `-DsparkVersions=X.Y`:
+   ```bash
+   ./gradlew -DsparkVersions=X.Y :iceberg-spark:iceberg-spark-X.Y_S.S:classes
+   ./gradlew -DsparkVersions=X.Y :iceberg-spark:iceberg-spark-X.Y_S.S:test \
+       --tests "*Hybrid*" --tests "*BigQueryStream*"
+   ./gradlew -DsparkVersions=X.Y :iceberg-spark:iceberg-spark-X.Y_S.S:checkstyleMain \
+       :iceberg-spark:iceberg-spark-X.Y_S.S:checkstyleTest \
+       :iceberg-spark:iceberg-spark-X.Y_S.S:spotlessJavaCheck
+   ```
+   Should produce 16 passing tests across the three test classes (5 + 7 + 4) — same
+   count as v3.5 and v4.0.
+
+### 9.2 Worth noting on Scala 2.12 vs 2.13
+
+Spark 4.0 uses Scala 2.13, Spark 3.5 uses Scala 2.12. The HybridStream source code uses
+no Scala APIs, so the per-Scala compile is incidental. The connector libraries
+(`bigquery-connector-common`, `spark-bigquery-dsv2-common`) are not Scala-suffixed (they're
+plain Java) and the same artifact resolves cleanly for both Scala versions.
+
+### 9.3 When the copy approach starts hurting
+
+For Slice 4 work and beyond, six new classes per Spark version means each bug-fix or
+refactor doubles. If you expect HybridStream to keep growing (more readers, schema mapping
+helpers, splittable-stream logic), consider extracting an
+`iceberg-spark-hybridstream-common` module that both `iceberg-spark-3.5_*` and
+`iceberg-spark-4.0_*` depend on. Build it with `compileOnly` against a Spark API surface
+that's stable across versions (`SparkScan`, `SparkBatch`, `SparkInputPartition`, the
+DSv2 reader factories) so it doesn't itself become Spark-version-specific. As of writing,
+the duplication is small enough that copy-paste is still the right call.
+
+---
+
+## 10. Verification commands
 
 A consolidated verification recipe per slice. Each slice's tests should be a strict superset of
 the previous slice's still passing.
@@ -1465,9 +1563,28 @@ the previous slice's still passing.
 
 If `spotlessJavaCheck` fails, run `./gradlew ...:spotlessApply` to auto-format.
 
+### After the Spark 4.0 port
+
+Run the same Slice 3 commands against the v4.0 module:
+
+```bash
+./gradlew -DsparkVersions=4.0 :iceberg-spark:iceberg-spark-4.0_2.13:classes
+./gradlew -DsparkVersions=4.0 :iceberg-spark:iceberg-spark-4.0_2.13:test \
+    --tests "org.apache.iceberg.spark.source.TestHybridColumnarReaderFactory" \
+    --tests "org.apache.iceberg.spark.source.TestBigQueryStreamColumnarReader" \
+    --tests "org.apache.iceberg.spark.source.TestHybridSparkScan"
+./gradlew -DsparkVersions=4.0 :iceberg-spark:iceberg-spark-4.0_2.13:checkstyleMain \
+    :iceberg-spark:iceberg-spark-4.0_2.13:checkstyleTest \
+    :iceberg-spark:iceberg-spark-4.0_2.13:spotlessJavaCheck
+```
+
+Same 16-test pass count (5 + 7 + 4) as v3.5. Iceberg's `settings.gradle` only includes a
+Spark version's modules when listed in `-DsparkVersions=...`, so without the flag Gradle
+won't even know the project exists. To verify both at once: `-DsparkVersions=3.5,4.0`.
+
 ---
 
-## 10. Pitfalls encountered (and how to avoid them)
+## 11. Pitfalls encountered (and how to avoid them)
 
 ### Slice 1
 
@@ -1513,12 +1630,16 @@ If `spotlessJavaCheck` fails, run `./gradlew ...:spotlessApply` to auto-format.
 
 ---
 
-## 11. Known limitations and Slice 4 roadmap
+## 12. Known limitations and Slice 4 roadmap
 
 These items are explicitly out of scope for Slices 1–3 and need work before HybridStream is
-production-ready:
+production-ready. Items 12.1–12.5 are the ones blocked on Google-internal knowledge
+(google3, internal artifact registry, internal docs) — those are tracked formally in
+[`slice-4-research-prompt.md`](slice-4-research-prompt.md), a structured discovery brief
+that an internal Google research agent can execute. Read that file in tandem with this
+section once Slice 4 starts.
 
-### 11.1 `bq-advanced` table mode detection
+### 12.1 `bq-advanced` table mode detection
 
 `SparkScanBuilder.buildBatchScan()` has a TODO comment but no actual dispatch. Decide:
 
@@ -1527,7 +1648,7 @@ production-ready:
 - Same scan or different builder for `bq-advanced` tables? (Recommendation: same builder, dispatch
   inside `buildBatchScan()`.)
 
-### 11.2 Real `BqAdvancedScanPlanner` implementation
+### 12.2 Real `BqAdvancedScanPlanner` implementation
 
 The SPI exists; nothing implements it. Wire a real planner that calls
 `com.google.cloud.bigquery.storage.v1beta2.BigQueryRead.GenerateScanPlan` and constructs
@@ -1537,7 +1658,7 @@ The SPI exists; nothing implements it. Wire a real planner that calls
 - The connector's `ReadSessionCreator`/`BigQueryClientFactory` is reusable; consider whether
   to depend on it directly or call the proto stubs.
 
-### 11.3 Credential vending
+### 12.3 Credential vending
 
 `HybridReaderConfig.clientFactory` must arrive at the executor with credentials baked in.
 Two options:
@@ -1550,14 +1671,14 @@ Two options:
 
 The user (Dataproc team) has flagged this as a Slice 4 decision.
 
-### 11.4 File-half routing refinement in `HybridSparkBatch`
+### 12.4 File-half routing refinement in `HybridSparkBatch`
 
 Today `HybridSparkBatch.createReaderFactory()` hard-codes Parquet vectorization. ORC tables and
 Parquet tables with equality deletes will silently get the wrong reader. Fix: filter the task
 groups to file-only, then run the same `useParquetBatchReads`/`useOrcBatchReads` predicates as
 `SparkBatch` does. Cleanest path is making those predicates `protected` in `SparkBatch`.
 
-### 11.5 End-to-end test with a fake/live BQ Storage server
+### 12.5 End-to-end test with a fake/live BQ Storage server
 
 Slice 3 unit tests use Mockito throughout. There is no test that actually opens a gRPC stream.
 For Slice 4 add either:
@@ -1566,27 +1687,27 @@ For Slice 4 add either:
 - A fake gRPC server that serves canned `ReadRowsResponse`s, exercising the
   `BigQueryStreamColumnarReader → ArrowInputPartitionContext` path.
 
-### 11.6 Schema / field-ID mapping
+### 12.6 Schema / field-ID mapping
 
 `BqStreamScanTask` carries the BQ Arrow schema as serialized bytes. The `ColumnarBatch` produced
 by the connector uses BQ-derived column names; Iceberg downstream expects column resolution by
 field ID. Slice 4 needs an `ArrowSchemaConverter` extension (or similar) that maps BQ Arrow
 columns to Iceberg field IDs for correct projection / nested struct handling.
 
-### 11.7 NQE (Native Query Engine) support
+### 12.7 NQE (Native Query Engine) support
 
 This whole design fixes Spark's DSv2 path. Dataproc's C++/Velox NQE is a separate execution
 engine that won't traverse `HybridColumnarReaderFactory`. NQE integration is an entirely
 separate effort.
 
-### 11.8 Iceberg 1.11 REST `PlanTable` alignment
+### 12.8 Iceberg 1.11 REST `PlanTable` alignment
 
 When Iceberg 1.11 lands, the planning logic moves to the REST catalog server side
 (`PlanTable` API). The `BqAdvancedScanPlanner` SPI call should migrate from the
 `SparkScanBuilder` to the REST catalog server. The task data model (`BqStreamScanTask`)
 shouldn't need to change.
 
-### 11.9 Stream skew
+### 12.9 Stream skew
 
 `BqStreamScanTask` is non-splittable and non-mergeable. If `GenerateScanPlan` returns very
 uneven stream sizes, Spark task skew is possible. Options for Slice 5+: implement
