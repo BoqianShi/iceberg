@@ -408,15 +408,36 @@ public class SparkScanBuilder
 
   private Scan buildBatchScan() {
     Schema expectedSchema = schemaWithMetadataColumns();
-    // TODO(bq-advanced): when the table is in bq-advanced mode, route to HybridSparkScan
-    //   so that the BigQuery Storage Read API stream half is planned alongside the GCS file half.
-    //   Detection of bq-advanced mode (table property, catalog signal, or BigLake metadata) and
-    //   wiring of a real BqAdvancedScanPlanner that calls GenerateScanPlan are tracked in the
-    //   HybridStream Slice 2 follow-up.
+    if (BqAdvancedTableProperty.isEnabled(table)) {
+      return buildHybridBatchScan(expectedSchema);
+    }
     return new SparkBatchQueryScan(
         spark,
         table,
         buildIcebergBatchScan(false /* not include Column Stats */, expectedSchema),
+        readConf,
+        expectedSchema,
+        filterExpressions,
+        metricsReporter::scanReport);
+  }
+
+  private Scan buildHybridBatchScan(Schema expectedSchema) {
+    // TODO(slice-4-cred-vending): construct a real BigQueryClientFactory + connector factories
+    //   from the active Spark conf / table properties via the connector's SparkBigQueryConfig
+    //   path and replace the noop wiring below. Until the v1beta2 GenerateScanPlan jar is
+    //   available on the Iceberg classpath (see TODO in spark/v4.0/build.gradle), the planner
+    //   stays a noop and the executor never opens a BigQuery stream — meaning a query against
+    //   a bq-advanced table will read only its GCS half. This matches today's behavior, plus
+    //   the dispatch path is now exercised so Slice 4 can fill in the real planner without
+    //   touching SparkScanBuilder again.
+    BqAdvancedScanPlanner planner = BqAdvancedScanPlanner.noop();
+    HybridReaderConfig readerConfig = new HybridReaderConfig(null, null, null, null, null);
+    return new HybridSparkScan(
+        spark,
+        table,
+        buildIcebergBatchScan(false /* not include Column Stats */, expectedSchema),
+        planner,
+        readerConfig,
         readConf,
         expectedSchema,
         filterExpressions,

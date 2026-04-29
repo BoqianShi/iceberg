@@ -109,6 +109,19 @@ project(":iceberg-spark:iceberg-spark-${sparkMajorVersion}_${scalaVersion}") {
       exclude group: 'io.netty'
     }
 
+    // TODO(slice-4-artifact-registry): add the v1beta2 google-cloud-bigquerystorage jar
+    // here. The artifact is hosted on Google's internal artifact registry (not Maven Central);
+    // wiring it requires (a) adding the registry to the project's `repositories { ... }` block
+    // — likely via a credentials helper since the registry is auth-gated — and (b) un-commenting
+    // the libs.bigquery.storage.v1beta2 entry in gradle/libs.versions.toml. Until both land,
+    // GenerateScanPlanScanPlanner.planStreams() throws UnsupportedOperationException.
+    //
+    // implementation(libs.bigquery.storage.v1beta2) {
+    //   exclude group: 'org.apache.arrow'
+    //   exclude group: 'io.netty'
+    //   exclude group: 'com.google.protobuf'  // align with connector's pinned protobuf
+    // }
+
     testImplementation(libs.hadoop3.minicluster) {
       exclude group: 'org.apache.avro', module: 'avro'
       // to make sure netty libs only come from project(':iceberg-arrow')
