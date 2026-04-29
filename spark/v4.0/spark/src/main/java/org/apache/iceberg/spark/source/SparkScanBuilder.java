@@ -408,6 +408,11 @@ public class SparkScanBuilder
 
   private Scan buildBatchScan() {
     Schema expectedSchema = schemaWithMetadataColumns();
+    // TODO(bq-advanced): when the table is in bq-advanced mode, route to HybridSparkScan
+    //   so that the BigQuery Storage Read API stream half is planned alongside the GCS file half.
+    //   Detection of bq-advanced mode (table property, catalog signal, or BigLake metadata) and
+    //   wiring of a real BqAdvancedScanPlanner that calls GenerateScanPlan are tracked in the
+    //   HybridStream Slice 2 follow-up.
     return new SparkBatchQueryScan(
         spark,
         table,
